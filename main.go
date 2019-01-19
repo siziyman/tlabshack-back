@@ -14,14 +14,14 @@ import (
 
 type State struct {
 	DeviceInfo      map[string][]DeviceMetadata
-	RideNumber      string
+	RideNumber      int
 	DriverData      []DriverMetadata
 	FirebaseApp     *firebase.App
 	MessagingClient *messaging.Client
 }
 
 type DriverMetadata struct {
-	Wallet string `json:"wallet"`
+	Wallet   string `json:"wallet"`
 	RideData `json:"ride-data"`
 }
 
@@ -44,9 +44,10 @@ type RideData struct {
 var state State
 
 func main() {
+
 	state := State{
-		DeviceInfo:  map[string][]DeviceMetadata{},
-		RideNumber:  "",
+		DeviceInfo:  make(map[string][]DeviceMetadata),
+		RideNumber:  0,
 		DriverData:  []DriverMetadata{},
 		FirebaseApp: nil,
 	}
@@ -100,6 +101,7 @@ func drive(writer http.ResponseWriter, request *http.Request, params httprouter.
 	driverMetadata := new(DriverMetadata)
 	err := json.NewDecoder(request.Body).Decode(driverMetadata)
 	if err != nil {
+		log.Println(err.Error())
 		log.Println("айайай драйв")
 	}
 	_ = append(state.DriverData, *driverMetadata)
@@ -114,10 +116,17 @@ func registerDevice(w http.ResponseWriter, r *http.Request, ps httprouter.Params
 
 	err := json.NewDecoder(r.Body).Decode(metadata)
 	if err != nil {
-		log.Println("ойойой")
+		log.Println(err.Error())
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte("Invalid request body"))
+		return
+	}
+	if state.DeviceInfo[metadata.TokenId] == nil {
+		state.DeviceInfo[metadata.TokenId] = []DeviceMetadata{}
 	}
 	_ = append(state.DeviceInfo[metadata.TokenId], *metadata)
 
+	_, _ = w.Write([]byte("Successfully registered"))
 	//state.FirebaseApp.
 
 }
