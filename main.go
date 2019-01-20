@@ -259,7 +259,7 @@ func sendPush(message string) {
 }
 
 func balance(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
-	address := params.ByName("waller")
+	address := params.ByName("wallet")
 	resp, err := http.Get(baseUrl + "account/" + address)
 	if err != nil {
 		errStr := "Error checking balance"
@@ -274,6 +274,17 @@ func balance(writer http.ResponseWriter, request *http.Request, params httproute
 	err = json.NewDecoder(resp.Body).Decode(balance)
 	if err != nil {
 		errStr := "Error checking balance step 2"
+		log.Printf("%v\n", resp)
+		log.Println(errStr)
+		log.Println(err.Error())
+		writer.WriteHeader(500)
+		_, _ = writer.Write([]byte(errStr))
+		return
+	}
+	js, err := json.Marshal(balance)
+	if err != nil {
+		errStr := "Error checking balance step 3"
+		log.Printf("%v\n", resp)
 		log.Println(errStr)
 		log.Println(err.Error())
 		writer.WriteHeader(500)
@@ -282,5 +293,5 @@ func balance(writer http.ResponseWriter, request *http.Request, params httproute
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(200)
-	fmt.Fprintf(writer, "%s", balance)
+	writer.Write(js)
 }
