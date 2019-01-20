@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"./rides"
 	"firebase.google.com/go"
 	"firebase.google.com/go/messaging"
 	"github.com/julienschmidt/httprouter"
-	"github.com/siziyman/tlabshack-back/rides"
 	"google.golang.org/api/option"
 )
 
@@ -31,6 +32,12 @@ type State struct {
 type DriverMetadata struct {
 	Wallet   string   `json:"wallet"`
 	RideData RideData `json:"rideData"`
+}
+
+type ParkingRequest struct {
+	ID         string `json:"id"`
+	Wallet     string `json:"wallet"`
+	PrivateKey string `json:"privateKey"`
 }
 
 type DeviceMetadata struct {
@@ -68,6 +75,9 @@ type BalanceRequest struct {
 
 var state State
 var baseUrl = "https://demo.stax.tlabs.cloud/projects/yetAnotherTeam/contexts/Stax_1/"
+
+const parkingAccount = "0x5a40fE165B188d15a9Fe1411F5Aee170b53bc871"
+const IOTAOriginator = "PXKEFBWMND9SVDUHMIXAGHODJWCUZ9XI9FRSZGNJS9TXNZ9XPAZAUMNIFDNWYZTFSMSYSZYXQOYJVURGD"
 
 func main() {
 
@@ -122,7 +132,66 @@ func main() {
 	router.POST("/availableRides", seekRide)
 	router.POST("/verifyRide", verifyRide)
 	router.GET("/balance/:wallet", balance)
-	log.Fatal(http.ListenAndServe("10.177.1.146:8000", router))
+	router.POST("/parkCar", parkCar)
+	log.Fatal(http.ListenAndServe("10.177.1.130:8080", router))
+}
+
+func parkCar(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
+	parkingRequest := new(ParkingRequest)
+	log.Println("Parking car")
+	err := json.NewDecoder(request.Body).Decode(parkingRequest)
+	if err != nil {
+		log.Println(err.Error())
+		writer.WriteHeader(400)
+		_, _ = writer.Write([]byte("Invalid request body"))
+
+	}
+
+	str := fmt.Sprintf(`{
+	"recipient_ref": "%s",
+	"amount": 1000
+}
+`, parkingAccount)
+	reader := strings.NewReader(str)
+	newRequest, err := http.NewRequest("POST", baseUrl+"payment", reader)
+	newRequest.Header.Add("Originator-Ref", parkingRequest.Wallet)
+	newRequest.Header.Add("Authorization", "0x"+parkingRequest.PrivateKey)
+
+	log.Println("Paying for parking: " + str)
+	client := &http.Client{}
+	response, err := client.Do(newRequest)
+	if err != nil {
+		log.Println("Error trying to conduct payment")
+		log.Println(err.Error())
+		writer.WriteHeader(500)
+		_, _ = writer.Write([]byte("Error trying to conduct payment"))
+	}
+	bytes, err := ioutil.ReadAll(response.Body)
+	log.Println(string(bytes))
+	//log.Println("Status code " + string(response.StatusCode))
+	log.Println("Storing parking data")
+	storeParkingData(parkingRequest)
+
+}
+
+func storeParkingData(parkingRequest *ParkingRequest) {
+	storageBody := fmt.Sprintf(`{
+			"data": "%s",
+			"time": "%s"
+		}`, parkingRequest.Wallet, time.Now().String())
+	log.Println("store data: " + storageBody)
+	bodyReader := strings.NewReader(storageBody)
+	request, _ := http.NewRequest("POST", baseUrl+"/storage", bodyReader)
+	request.Header.Add("Originator-Ref", IOTAOriginator)
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	log.Println(resp.StatusCode)
+	storeResponseBody, _ := ioutil.ReadAll(resp.Body)
+	log.Println(string(storeResponseBody))
+	if err != nil {
+		log.Println(err.Error())
+		log.Println("Error storing data")
+	}
 }
 
 func verifyRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
@@ -139,7 +208,7 @@ func verifyRide(writer http.ResponseWriter, request *http.Request, params httpro
 	"recipient_ref": "%s",
 	"amount": 1000
 }
-`)
+`, verifyRequest.DriverWallet)
 	reader := strings.NewReader(str)
 	newRequest, err := http.NewRequest("POST", baseUrl+"payment", reader)
 	newRequest.Header.Add("Originator-Ref", verifyRequest.Wallet)
@@ -242,6 +311,10 @@ func sendPush(message string) {
 
 	// See documentation on defining a message payload.
 	msg := &messaging.Message{
+		Notification: &messaging.Notification{
+			Title: "Companion found!",
+			Body:  "Found person to share a ride with you",
+		},
 		Data: map[string]string{
 			"message": message,
 		},
@@ -294,4 +367,5 @@ func balance(writer http.ResponseWriter, request *http.Request, params httproute
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(200)
 	writer.Write(js)
+	//_, _ = fmt.Fprintf(writer, "%d", balance.Balance)
 }
