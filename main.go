@@ -3,16 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"firebase.google.com/go"
-	"firebase.google.com/go/messaging"
 	"fmt"
-	"github.com/julienschmidt/httprouter"
-	"google.golang.org/api/option"
 	"log"
 	"net/http"
 	"strings"
 	"time"
-	"tlabshack/rides"
+
+	"firebase.google.com/go"
+	"firebase.google.com/go/messaging"
+	"github.com/julienschmidt/httprouter"
+	"github.com/siziyman/tlabshack-back/rides"
+	"google.golang.org/api/option"
 )
 
 type BalanceResponse struct {
@@ -59,6 +60,10 @@ type VerifyRequest struct {
 	Wallet       string `json:"wallet"`
 	PrivateKey   string `json:"privateKey"`
 	DriverWallet string `json:"driverWallet"`
+}
+
+type BalanceRequest struct {
+	Wallet string `json:"wallet"`
 }
 
 var state State
@@ -116,7 +121,8 @@ func main() {
 	router.POST("/registerDriver", drive)
 	router.POST("/availableRides", seekRide)
 	router.POST("/verifyRide", verifyRide)
-	log.Fatal(http.ListenAndServe("10.177.1.130:8080", router))
+	router.POST("/balance", balance)
+	log.Fatal(http.ListenAndServe("10.177.1.146:8000", router))
 }
 
 func verifyRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
@@ -250,4 +256,33 @@ func sendPush(message string) {
 		return
 	}
 	log.Println(response)
+}
+
+func balance(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
+	metadata := new(BalanceRequest)
+
+	err := json.NewDecoder(request.Body).Decode(metadata)
+	resp, err := http.Get(baseUrl + "account/" + metadata.Wallet)
+	if err != nil {
+		errStr := "Error checking balance"
+		log.Println(errStr)
+		log.Println(err.Error())
+		writer.WriteHeader(500)
+		_, _ = writer.Write([]byte(errStr))
+		return
+	}
+
+	balance := new(BalanceResponse)
+	err = json.NewDecoder(resp.Body).Decode(balance)
+	if err != nil {
+		errStr := "Error checking balance step 2"
+		log.Println(errStr)
+		log.Println(err.Error())
+		writer.WriteHeader(500)
+		_, _ = writer.Write([]byte(errStr))
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(200)
+	fmt.Fprintf(writer, "%s", balance)
 }
