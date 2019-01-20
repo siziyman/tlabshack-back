@@ -45,7 +45,7 @@ var state State
 
 func main() {
 
-	state := State{
+	state = State{
 		DeviceInfo:  make(map[string][]DeviceMetadata),
 		RideNumber:  0,
 		DriverData:  []DriverMetadata{},
@@ -122,9 +122,9 @@ func registerDevice(w http.ResponseWriter, r *http.Request, ps httprouter.Params
 		return
 	}
 	if state.DeviceInfo[metadata.TokenId] == nil {
-		state.DeviceInfo[metadata.TokenId] = []DeviceMetadata{}
+		state.DeviceInfo[metadata.TokenId] = make([]DeviceMetadata, 0)
 	}
-	_ = append(state.DeviceInfo[metadata.TokenId], *metadata)
+	state.DeviceInfo[metadata.TokenId] = append(state.DeviceInfo[metadata.TokenId], *metadata)
 
 	_, _ = w.Write([]byte("Successfully registered"))
 	//state.FirebaseApp.
