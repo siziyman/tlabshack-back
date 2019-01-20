@@ -3,17 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
-	"net/http"
-	"time"
-
-	"github.com/siziyman/tlabshack-back/rides"
-
-	firebase "firebase.google.com/go"
+	"firebase.google.com/go"
 	"firebase.google.com/go/messaging"
+	"fmt"
 	"github.com/julienschmidt/httprouter"
 	"google.golang.org/api/option"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+	"tlabshack/rides"
 )
+
+type BalanceResponse struct {
+	Balance int64 `json:"balance"`
+}
 
 type State struct {
 	DeviceInfo      map[string][]DeviceMetadata
@@ -24,8 +28,8 @@ type State struct {
 }
 
 type DriverMetadata struct {
-	Wallet   string `json:"wallet"`
-	RideData `json:"ride-data"`
+	Wallet   string   `json:"wallet"`
+	RideData RideData `json:"rideData"`
 }
 
 type DeviceMetadata struct {
@@ -47,9 +51,17 @@ type RideData struct {
 type RideRequest struct {
 	RideData RideData `json:"rideData"`
 	Message  string   `json:"message"`
+	Wallet   string   `json:"wallet"`
+}
+
+type VerifyRequest struct {
+	Wallet       string `json:"wallet"`
+	PrivateKey   string `json:"privateKey"`
+	DriverWallet string `json:"driverWallet"`
 }
 
 var state State
+var baseUrl = "https://demo.stax.tlabs.cloud/projects/yetAnotherTeam/contexts/Stax_1/"
 
 func main() {
 
@@ -102,7 +114,30 @@ func main() {
 	router.POST("/registerDevice", registerDevice)
 	router.POST("/registerDriver", drive)
 	router.GET("/availableRides", seekRide)
+	router.POST("/verifyRide", verifyRide)
 	log.Fatal(http.ListenAndServe("10.177.1.130:8080", router))
+}
+
+func verifyRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
+	verifyRequest := new(VerifyRequest)
+
+	err := json.NewDecoder(request.Body).Decode(verifyRequest)
+	if err != nil {
+		log.Println(err.Error())
+		writer.WriteHeader(400)
+		_, _ = writer.Write([]byte("Invalid request body"))
+		return
+	}
+	str := fmt.Sprintf(`{
+	"recipient_ref": "%s",
+	"amount": 1000
+}
+`)
+	reader := strings.NewReader(str)
+	newRequest, err := http.NewRequest("POST", baseUrl+"payment", reader)
+	newRequest.Header.Add("Originator-Ref", verifyRequest.Wallet)
+	newRequest.Header.Add("Authorization", verifyRequest.PrivateKey)
+
 }
 
 func drive(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
@@ -121,7 +156,33 @@ func drive(writer http.ResponseWriter, request *http.Request, params httprouter.
 func seekRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
 	rideRequest := new(RideRequest)
 
-	err := json.NewDecoder(request.Body).Decode(rideRequest)
+	resp, err := http.Get(baseUrl + "account/" + rideRequest.Wallet)
+	if err != nil {
+		errStr := "Error checking balance"
+		log.Println(errStr)
+		writer.WriteHeader(500)
+		_, _ = writer.Write([]byte(errStr))
+		return
+	}
+
+	balance := new(BalanceResponse)
+	err = json.NewDecoder(resp.Body).Decode(balance)
+	if err != nil {
+		errStr := "Error checking balance"
+		log.Println(errStr)
+		writer.WriteHeader(500)
+		_, _ = writer.Write([]byte(errStr))
+		return
+	}
+	if balance.Balance < 1100 {
+		errStr := "Not enough balance to pay for the ride"
+		log.Println(errStr)
+		writer.WriteHeader(402)
+		_, _ = writer.Write([]byte(errStr))
+		return
+	}
+
+	err = json.NewDecoder(request.Body).Decode(rideRequest)
 	if err != nil {
 		log.Println(err.Error())
 		writer.WriteHeader(400)
@@ -129,17 +190,20 @@ func seekRide(writer http.ResponseWriter, request *http.Request, params httprout
 		return
 	}
 
-	for _, driver := range State.DriverMetadata {
+	for _, driver := range state.DriverData {
 		first := rides.Distance(driver.RideData.StartPoint.Latitude, driver.RideData.StartPoint.Longitude, rideRequest.RideData.StartPoint.Latitude, rideRequest.RideData.StartPoint.Longitude)
-		second := rides.Distance(driver.RideData.EndPoint.Latitude, driver.RideData.EndPoint.Longitude, rideRequest.RideData.EndPoint.Latitude, rideRequest.EndPoint.Longitude)
+		second := rides.Distance(driver.RideData.EndPoint.Latitude, driver.RideData.EndPoint.Longitude, rideRequest.RideData.EndPoint.Latitude, rideRequest.RideData.EndPoint.Longitude)
 		if first+second < 1000 {
-			for _, device := range State.DeviceMetadata {
-				if device.Wallet == driver.Wallet {
-					sendPush(device.TokenId, rideRequest.Message)
-					writer.WriteHeader(200)
-					_, _ = writer.Write([]byte("Ride request was sent"))
-					return
+			for k, devices := range state.DeviceInfo {
+				if k == driver.Wallet {
+					for _, device := range devices {
+						sendPush(device.TokenId, rideRequest.Message)
+						writer.WriteHeader(200)
+						_, _ = writer.Write([]byte("Ride request was sent"))
+						return
+					}
 				}
+
 			}
 		}
 	}
@@ -169,12 +233,9 @@ func registerDevice(w http.ResponseWriter, r *http.Request, ps httprouter.Params
 
 func sendPush(registrationToken, message string) {
 	// Obtain a messaging.Client from the App.
-	if err != nil {
-		log.Fatalf("error getting Messaging client: %v\n", err)
-	}
 
 	// See documentation on defining a message payload.
-	message := &messaging.Message{
+	msg := &messaging.Message{
 		Data: map[string]string{
 			"message": message,
 		},
@@ -183,8 +244,10 @@ func sendPush(registrationToken, message string) {
 
 	// Send a message to the device corresponding to the provided
 	// registration token.
-	response, err := State.MessagingClient.Send(ctx, message)
+	response, err := state.MessagingClient.Send(context.Background(), msg)
 	if err != nil {
 		log.Fatalln(err)
+		return
 	}
+	log.Println(response)
 }
