@@ -49,9 +49,10 @@ type RideData struct {
 }
 
 type RideRequest struct {
-	RideData RideData `json:"rideData"`
-	Message  string   `json:"message"`
-	Wallet   string   `json:"wallet"`
+	From    Coordinates `json:"from"`
+	To      Coordinates `json:"to"`
+	Message string      `json:"message"`
+	Wallet  string      `json:"wallet"`
 }
 
 type VerifyRequest struct {
@@ -108,12 +109,12 @@ func main() {
 	//androidConfig.Notification.Body = "HELLO"
 	msg.Android = androidConfig
 	//msg.Data = map[string]string{"hell": "hello"}
-	s, e := client.Send(ctx, msg)
-	log.Println(s)
+	//s, e := client.Send(ctx, msg)
+	//log.Println(s)
 	router := httprouter.New()
 	router.POST("/registerDevice", registerDevice)
 	router.POST("/registerDriver", drive)
-	router.GET("/availableRides", seekRide)
+	router.POST("/availableRides", seekRide)
 	router.POST("/verifyRide", verifyRide)
 	log.Fatal(http.ListenAndServe("10.177.1.130:8080", router))
 }
@@ -156,10 +157,18 @@ func drive(writer http.ResponseWriter, request *http.Request, params httprouter.
 func seekRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
 	rideRequest := new(RideRequest)
 
+	err := json.NewDecoder(request.Body).Decode(rideRequest)
+	if err != nil {
+		log.Println(err.Error())
+		writer.WriteHeader(400)
+		_, _ = writer.Write([]byte("Bad request body"))
+	}
+
 	resp, err := http.Get(baseUrl + "account/" + rideRequest.Wallet)
 	if err != nil {
 		errStr := "Error checking balance"
 		log.Println(errStr)
+		log.Println(err.Error())
 		writer.WriteHeader(500)
 		_, _ = writer.Write([]byte(errStr))
 		return
@@ -168,8 +177,9 @@ func seekRide(writer http.ResponseWriter, request *http.Request, params httprout
 	balance := new(BalanceResponse)
 	err = json.NewDecoder(resp.Body).Decode(balance)
 	if err != nil {
-		errStr := "Error checking balance"
+		errStr := "Error checking balance step 2"
 		log.Println(errStr)
+		log.Println(err.Error())
 		writer.WriteHeader(500)
 		_, _ = writer.Write([]byte(errStr))
 		return
@@ -182,31 +192,21 @@ func seekRide(writer http.ResponseWriter, request *http.Request, params httprout
 		return
 	}
 
-	err = json.NewDecoder(request.Body).Decode(rideRequest)
-	if err != nil {
-		log.Println(err.Error())
-		writer.WriteHeader(400)
-		_, _ = writer.Write([]byte("Invalid request body"))
-		return
-	}
-
 	for _, driver := range state.DriverData {
-		first := rides.Distance(driver.RideData.StartPoint.Latitude, driver.RideData.StartPoint.Longitude, rideRequest.RideData.StartPoint.Latitude, rideRequest.RideData.StartPoint.Longitude)
-		second := rides.Distance(driver.RideData.EndPoint.Latitude, driver.RideData.EndPoint.Longitude, rideRequest.RideData.EndPoint.Latitude, rideRequest.RideData.EndPoint.Longitude)
+		first := rides.Distance(driver.RideData.StartPoint.Latitude, driver.RideData.StartPoint.Longitude, rideRequest.From.Latitude, rideRequest.From.Longitude)
+		second := rides.Distance(driver.RideData.EndPoint.Latitude, driver.RideData.EndPoint.Longitude, rideRequest.To.Latitude, rideRequest.To.Longitude)
 		if first+second < 1000 {
-			for k, devices := range state.DeviceInfo {
-				if k == driver.Wallet {
-					for _, device := range devices {
-						sendPush(device.TokenId, rideRequest.Message)
-						writer.WriteHeader(200)
-						_, _ = writer.Write([]byte("Ride request was sent"))
-						return
-					}
-				}
-
-			}
+			sendPush(rideRequest.Message)
+			//for _, devices := range state.DeviceInfo {
+			//	for _, device := range devices {
+			//		writer.WriteHeader(200)
+			//		_, _ = writer.Write([]byte("Ride request was sent"))
+			//	}
+			return
+			//}
 		}
 	}
+	//return
 	writer.WriteHeader(404)
 	_, _ = writer.Write([]byte("Drivers not found"))
 }
@@ -231,7 +231,7 @@ func registerDevice(w http.ResponseWriter, r *http.Request, ps httprouter.Params
 
 }
 
-func sendPush(registrationToken, message string) {
+func sendPush(message string) {
 	// Obtain a messaging.Client from the App.
 
 	// See documentation on defining a message payload.
@@ -239,7 +239,7 @@ func sendPush(registrationToken, message string) {
 		Data: map[string]string{
 			"message": message,
 		},
-		Token: registrationToken,
+		Topic: "ride",
 	}
 
 	// Send a message to the device corresponding to the provided
