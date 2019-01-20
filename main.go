@@ -121,7 +121,7 @@ func main() {
 	router.POST("/registerDriver", drive)
 	router.POST("/availableRides", seekRide)
 	router.POST("/verifyRide", verifyRide)
-	router.POST("/balance", balance)
+	router.GET("/balance/:wallet", balance)
 	log.Fatal(http.ListenAndServe("10.177.1.146:8000", router))
 }
 
@@ -259,10 +259,8 @@ func sendPush(message string) {
 }
 
 func balance(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
-	metadata := new(BalanceRequest)
-
-	err := json.NewDecoder(request.Body).Decode(metadata)
-	resp, err := http.Get(baseUrl + "account/" + metadata.Wallet)
+	address := params.ByName("waller")
+	resp, err := http.Get(baseUrl + "account/" + address)
 	if err != nil {
 		errStr := "Error checking balance"
 		log.Println(errStr)
