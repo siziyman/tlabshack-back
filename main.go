@@ -41,6 +41,11 @@ type RideData struct {
 	EndPoint   Coordinates `json:"to"`
 }
 
+type RideRequest struct {
+	RideData RideData `json:"rideData"`
+	Message  string   `json:"message"`
+}
+
 var state State
 
 func main() {
@@ -48,7 +53,7 @@ func main() {
 	state = State{
 		DeviceInfo:  make(map[string][]DeviceMetadata),
 		RideNumber:  0,
-		DriverData:  []DriverMetadata{},
+		DriverData:  make([]DriverMetadata, 0),
 		FirebaseApp: nil,
 	}
 	ctx := context.Background()
@@ -102,12 +107,24 @@ func drive(writer http.ResponseWriter, request *http.Request, params httprouter.
 	err := json.NewDecoder(request.Body).Decode(driverMetadata)
 	if err != nil {
 		log.Println(err.Error())
-		log.Println("айайай драйв")
+		writer.WriteHeader(400)
+		_, _ = writer.Write([]byte("Invalid request body"))
+		return
 	}
-	_ = append(state.DriverData, *driverMetadata)
+
+	state.DriverData = append(state.DriverData, *driverMetadata)
 }
 
 func seekRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
+	rideRequest := new(RideRequest)
+
+	err := json.NewDecoder(request.Body).Decode(rideRequest)
+	if err != nil {
+		log.Println(err.Error())
+		writer.WriteHeader(400)
+		_, _ = writer.Write([]byte("Invalid request body"))
+		return
+	}
 
 }
 
