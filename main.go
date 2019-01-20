@@ -196,7 +196,7 @@ func storeParkingData(parkingRequest *ParkingRequest) {
 
 func verifyRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
 	verifyRequest := new(VerifyRequest)
-
+	log.Println("Verifying ride")
 	err := json.NewDecoder(request.Body).Decode(verifyRequest)
 	if err != nil {
 		log.Println(err.Error())
@@ -209,10 +209,22 @@ func verifyRide(writer http.ResponseWriter, request *http.Request, params httpro
 	"amount": 1000
 }
 `, verifyRequest.DriverWallet)
+	log.Println("Paying for ride")
 	reader := strings.NewReader(str)
 	newRequest, err := http.NewRequest("POST", baseUrl+"payment", reader)
 	newRequest.Header.Add("Originator-Ref", verifyRequest.Wallet)
-	newRequest.Header.Add("Authorization", verifyRequest.PrivateKey)
+	newRequest.Header.Add("Authorization", "0x"+verifyRequest.PrivateKey)
+
+	client := &http.Client{}
+	responsePayment, err := client.Do(newRequest)
+	bytes, _ := ioutil.ReadAll(responsePayment.Body)
+	log.Println(responsePayment.StatusCode)
+	log.Println(string(bytes))
+	if responsePayment.StatusCode >= 400 {
+		writer.WriteHeader(400)
+	} else {
+		writer.WriteHeader(200)
+	}
 
 }
 
@@ -227,6 +239,7 @@ func drive(writer http.ResponseWriter, request *http.Request, params httprouter.
 	}
 
 	state.DriverData = append(state.DriverData, *driverMetadata)
+	writer.WriteHeader(200)
 }
 
 func seekRide(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
